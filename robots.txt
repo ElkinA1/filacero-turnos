@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+Disallow: /gracias
+Sitemap: https://elkina1.github.io/filacero-turnos/sitemap.xml
