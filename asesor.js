@@ -277,7 +277,24 @@
         guardar();
         pintar();
       })
-      .catch(function () { vista.preparando = null; sinConexion(); });
+      .catch(function () {
+        vista.preparando = null;
+        // Con el túnel rápido la URL cambia; servidor.js puede estar en caché. Se relee una vez.
+        if (!vista.releido && ajustes.api && script) {
+          vista.releido = true;
+          return fetch(new URL("servidor.js", script.src).href, { cache: "no-store" })
+            .then(function (r) { return r.text(); })
+            .then(function (codigo) {
+              var m = codigo.match(/api:\s*"(https?:\/\/[^"]+)"/);
+              if (!m || m[1].replace(/\/+$/, "") === API) throw new Error("sin cambio");
+              API = m[1].replace(/\/+$/, "");
+              actualizarEnlacesDemo();
+              return preparar();
+            })
+            .catch(function () { sinConexion(); });
+        }
+        sinConexion();
+      });
     return vista.preparando;
   }
 
@@ -315,11 +332,25 @@
     Promise.resolve(preparar())
       .then(function () {
         if (vista.conectado === false) throw new Error("offline");
-        return pedir("mensajes", { texto: texto, codigo: s.codigo || "", secreto: s.secreto || "", ficha: vista.ficha || "",
-          sitio_web: trampa.value, idioma: navigator.language || "", pagina: location.pathname.slice(0, 160) });
+        function mandar(intento) {
+          return pedir("mensajes", { texto: texto, codigo: s.codigo || "", secreto: s.secreto || "", ficha: vista.ficha || "",
+            sitio_web: trampa.value, idioma: navigator.language || "", pagina: location.pathname.slice(0, 160) })
+            .then(function (d) {
+              if (!d.reintentar || intento > 1) return d;
+              return new Promise(function (listo) { setTimeout(listo, Math.min(d.espera_ms || 2000, 5000)); })
+                .then(function () { return mandar(intento + 1); });
+            });
+        }
+        return mandar(0);
       })
       .then(function (d) {
+        if (!d.respuesta) throw new Error("sin respuesta");
         if (d.codigo) s.codigo = d.codigo;
+        if (d.idioma && T[d.idioma] && d.idioma !== L) {
+          // La interfaz sigue el idioma en que escribe el visitante.
+          L = d.idioma; t = T[L];
+          area.placeholder = t.placeholder; area.setAttribute("aria-label", t.placeholder);
+        }
         if (d.secreto) s.secreto = d.secreto;
         s.mensajes.push({ rol: "asesor", texto: d.respuesta, acciones: d.acciones, fuente: d.fuente });
         vista.sugerencias = d.sugerencias || [];
